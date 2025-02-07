@@ -1,8 +1,10 @@
 use std::fs;
 use std::sync::Mutex;
-use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
-use serde::{Serialize, Deserialize};
+use actix_web::{get, middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
 use actix_cors::Cors;
+use serde::{Serialize, Deserialize};
+use env_logger::Env;
+use log::error;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Book {
@@ -22,7 +24,6 @@ async fn hello() -> impl Responder {
 
 #[get("/books")]
 async fn get_books(data: web::Data<Mutex<AppState>>) -> impl Responder {
-    println!("books");
     let file_path = &data.lock().unwrap().data_file;
 
     match fs::read_to_string(file_path) {
@@ -38,6 +39,9 @@ async fn get_books(data: web::Data<Mutex<AppState>>) -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // ロガーの初期化
+    env_logger::init_from_env(Env::default().default_filter_or("info"));
+
     let books = web::Data::new(Mutex::new(AppState {
         data_file: "src/data/book.json".to_string(),
     }));
@@ -47,10 +51,26 @@ async fn main() -> std::io::Result<()> {
             .app_data(books.clone())
             .wrap(
                 Cors::default()
-                    .allow_any_origin() // すべてのオリジンを許可（本番環境では制限を推奨）
+                    .allowed_origin_fn(|origin, _req_head| {
+                        let allowed_origins = vec![
+                            "http://localhost:3000",
+                            "http://localhost:5173",
+                        ];
+
+                        let allowed = allowed_origins
+                            .into_iter()
+                            .any(|allowed_origin| allowed_origin == origin.to_str().unwrap());
+
+                        if !allowed {
+                            error!("CORS violation: Origin {:?} is not allowed", origin);
+                        }
+
+                        allowed
+                    })
                     .allow_any_method()
-                    .allow_any_header(),
+                    .allow_any_header()
             )
+            .wrap(Logger::default())
             .service(hello)
             .service(get_books)
     })
