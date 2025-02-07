@@ -2,6 +2,7 @@ use std::fs;
 use std::sync::Mutex;
 use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
 use serde::{Serialize, Deserialize};
+use actix_cors::Cors;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Book {
@@ -44,6 +45,12 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(books.clone())
+            .wrap(
+                Cors::default()
+                    .allow_any_origin() // すべてのオリジンを許可（本番環境では制限を推奨）
+                    .allow_any_method()
+                    .allow_any_header(),
+            )
             .service(hello)
             .service(get_books)
     })
