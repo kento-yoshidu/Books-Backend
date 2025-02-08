@@ -37,6 +37,28 @@ async fn get_books(data: web::Data<Mutex<AppState>>) -> impl Responder {
     }
 }
 
+#[get("/books/id/{id}")]
+async fn get_book_by_id(data: web::Data::<Mutex<AppState>>, id: web::Path<u32>) -> impl Responder {
+    let file_path = &data.lock().unwrap().data_file;
+    let id = id.into_inner();
+
+    match fs::read_to_string(file_path) {
+        Ok(contents) => {
+            match serde_json::from_str::<Vec<Book>>(&contents) {
+                Ok(books) => {
+                    if let Some(book) = books.into_iter().find(|b| b.id == id) {
+                        HttpResponse::Ok().json(book)
+                    } else {
+                        HttpResponse::NotFound().body("Book not found")
+                    }
+                },
+                Err(_) => HttpResponse::InternalServerError().body("Failed to parse JSON"),
+            }
+        },
+        Err(_) => HttpResponse::InternalServerError().body("Failed to read JSON"),
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // ロガーの初期化
@@ -73,6 +95,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Logger::default())
             .service(hello)
             .service(get_books)
+            .service(get_book_by_id)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
