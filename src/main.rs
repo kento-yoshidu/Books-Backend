@@ -1,3 +1,4 @@
+use std::env;
 use std::fs;
 use std::sync::Mutex;
 use actix_web::{get, middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
@@ -81,8 +82,11 @@ async fn get_book_by_id(data: web::Data::<Mutex<AppState>>, id: web::Path<u32>) 
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(Env::default().default_filter_or("info"));
 
+    let current_dir = env::current_dir().expect("Failed to get current dir");
+    let file_path = current_dir.join("src/data/book.json").to_str().unwrap().to_string();
+
     let books = web::Data::new(Mutex::new(AppState {
-        data_file: "src/data/book.json".to_string(),
+        data_file: file_path,
     }));
 
     HttpServer::new(move || {
@@ -117,4 +121,64 @@ async fn main() -> std::io::Result<()> {
     .bind(("127.0.0.1", 8080))?
     .run()
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, App};
+    use actix_web::http::StatusCode;
+
+    #[actix_rt::test]
+    async fn test_get_books() {
+        let current_dir = env::current_dir().expect("Failed to get current dir");
+        let file_path = current_dir.join("src/data/book.json").to_str().unwrap().to_string();
+
+        let books = web::Data::new(Mutex::new(AppState {
+            data_file: file_path,
+        }));
+
+        let app = test::init_service(App::new().app_data(books).service(get_books)).await;
+
+        let req = test::TestRequest::get().uri("/books").to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = test::read_body(resp).await;
+        let body = String::from_utf8_lossy(&body);
+
+        assert!(body.contains("Rust Basics"));
+        assert!(body.contains("Async in Rust"));
+    }
+
+    // #[actix_rt::test]
+    // async fn test_get_book_by_id() {
+    //     create_mock_data(); // モックデータの作成
+
+    //     let app = test::init_service(App::new().service(get_book_by_id)).await;
+
+    //     let req = test::TestRequest::get().uri("/books/id/1").to_request();
+    //     let resp = test::call_service(&app, req).await;
+
+    //     assert_eq!(resp.status(), StatusCode::OK);
+
+    //     let body = test::read_body(resp).await;
+    //     assert!(body.contains("Test Book"));
+    // }
+
+    // #[actix_rt::test]
+    // async fn test_get_book_not_found() {
+    //     create_mock_data(); // モックデータの作成
+
+    //     let app = test::init_service(App::new().service(get_book_by_id)).await;
+
+    //     let req = test::TestRequest::get().uri("/books/id/999").to_request();
+    //     let resp = test::call_service(&app, req).await;
+
+    //     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+    //     let body = test::read_body(resp).await;
+    //     assert_eq!(body, "Book not found");
+    // }
 }
