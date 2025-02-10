@@ -158,14 +158,18 @@ mod tests {
     use actix_web::{test, App};
     use actix_web::http::StatusCode;
 
-    #[actix_rt::test]
-    async fn test_get_books() {
+    fn setup_books() -> web::Data<Mutex<AppState>> {
         let current_dir = env::current_dir().expect("Failed to get current dir");
         let file_path = current_dir.join("src/data/book.json").to_str().unwrap().to_string();
 
-        let books = web::Data::new(Mutex::new(AppState {
+        web::Data::new(Mutex::new(AppState {
             data_file: file_path,
-        }));
+        }))
+    }
+
+    #[actix_rt::test]
+    async fn test_get_books() {
+        let books = setup_books();
 
         let app = test::init_service(App::new().app_data(books).service(get_books)).await;
 
@@ -179,5 +183,45 @@ mod tests {
 
         assert!(body.contains("Rust Basics"));
         assert!(body.contains("Async in Rust"));
+        assert!(body.contains("Parallelism"));
+    }
+
+    #[actix_rt::test]
+    async fn test_get_book_by_id() {
+        let books = setup_books();
+
+        let app = test::init_service(App::new().app_data(books).service(get_book_by_id)).await;
+
+        let req = test::TestRequest::get().uri("/books/id/1").to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = test::read_body(resp).await;
+        let body = String::from_utf8_lossy(&body);
+
+        assert!(body.contains("Rust Basics"));
+
+        let req = test::TestRequest::get().uri("/books/id/50").to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = test::read_body(resp).await;
+        let body = String::from_utf8_lossy(&body);
+
+        assert!(body.contains("Parallelism"));
+    }
+
+    #[actix_rt::test]
+    async fn test_get_book_not_found() {
+        let books = setup_books();
+
+        let app = test::init_service(App::new().app_data(books).service(get_book_by_id)).await;
+
+        let req = test::TestRequest::get().uri("/books/id/999").to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }
