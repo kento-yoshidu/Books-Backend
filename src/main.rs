@@ -15,6 +15,11 @@ struct Book {
     content: String,
 }
 
+#[derive(Deserialize)]
+struct BookQuery {
+    id: Option<u32>,
+}
+
 struct AppState {
     data_file: String,
 }
@@ -58,6 +63,29 @@ async fn get_books(data: web::Data<Mutex<AppState>>) -> Result<impl Responder, B
     };
 
     let books = read_books_from_file(&file_path)?;
+    Ok(HttpResponse::Ok().json(books))
+}
+
+#[get("/books/search")]
+async fn get_book_with_query(
+    data: web::Data<Mutex<AppState>>,
+    query: web::Query<BookQuery>,
+) -> Result<impl Responder, BookError> {
+    let file_path = {
+        let state = data.lock().unwrap();
+        state.data_file.clone()
+    };
+
+    let books = read_books_from_file(&file_path)?;
+
+    if let Some(id) = query.id {
+        if let Some(book) = books.into_iter().find(|b| b.id == id as u32) {
+            return Ok(HttpResponse::Ok().json(book));
+        } else {
+            return Ok(HttpResponse::NotFound().body("Book not found"));
+        }
+    }
+
     Ok(HttpResponse::Ok().json(books))
 }
 
@@ -117,6 +145,7 @@ async fn main() -> std::io::Result<()> {
             .service(hello)
             .service(get_books)
             .service(get_book_by_id)
+            .service(get_book_with_query)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
@@ -151,34 +180,4 @@ mod tests {
         assert!(body.contains("Rust Basics"));
         assert!(body.contains("Async in Rust"));
     }
-
-    // #[actix_rt::test]
-    // async fn test_get_book_by_id() {
-    //     create_mock_data(); // モックデータの作成
-
-    //     let app = test::init_service(App::new().service(get_book_by_id)).await;
-
-    //     let req = test::TestRequest::get().uri("/books/id/1").to_request();
-    //     let resp = test::call_service(&app, req).await;
-
-    //     assert_eq!(resp.status(), StatusCode::OK);
-
-    //     let body = test::read_body(resp).await;
-    //     assert!(body.contains("Test Book"));
-    // }
-
-    // #[actix_rt::test]
-    // async fn test_get_book_not_found() {
-    //     create_mock_data(); // モックデータの作成
-
-    //     let app = test::init_service(App::new().service(get_book_by_id)).await;
-
-    //     let req = test::TestRequest::get().uri("/books/id/999").to_request();
-    //     let resp = test::call_service(&app, req).await;
-
-    //     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-
-    //     let body = test::read_body(resp).await;
-    //     assert_eq!(body, "Book not found");
-    // }
 }
