@@ -15,6 +15,11 @@ struct Book {
     content: String,
 }
 
+#[derive(Deserialize)]
+struct BookQuery {
+    id: Option<u32>,
+}
+
 struct AppState {
     data_file: String,
 }
@@ -58,6 +63,29 @@ async fn get_books(data: web::Data<Mutex<AppState>>) -> Result<impl Responder, B
     };
 
     let books = read_books_from_file(&file_path)?;
+    Ok(HttpResponse::Ok().json(books))
+}
+
+#[get("/books/search")]
+async fn get_book_with_query(
+    data: web::Data<Mutex<AppState>>,
+    query: web::Query<BookQuery>,
+) -> Result<impl Responder, BookError> {
+    let file_path = {
+        let state = data.lock().unwrap();
+        state.data_file.clone()
+    };
+
+    let books = read_books_from_file(&file_path)?;
+
+    if let Some(id) = query.id {
+        if let Some(book) = books.into_iter().find(|b| b.id == id as u32) {
+            return Ok(HttpResponse::Ok().json(book));
+        } else {
+            return Ok(HttpResponse::NotFound().body("Book not found"));
+        }
+    }
+
     Ok(HttpResponse::Ok().json(books))
 }
 
@@ -117,6 +145,7 @@ async fn main() -> std::io::Result<()> {
             .service(hello)
             .service(get_books)
             .service(get_book_by_id)
+            .service(get_book_with_query)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
@@ -129,14 +158,18 @@ mod tests {
     use actix_web::{test, App};
     use actix_web::http::StatusCode;
 
-    #[actix_rt::test]
-    async fn test_get_books() {
+    fn setup_books() -> web::Data<Mutex<AppState>> {
         let current_dir = env::current_dir().expect("Failed to get current dir");
         let file_path = current_dir.join("src/data/book.json").to_str().unwrap().to_string();
 
-        let books = web::Data::new(Mutex::new(AppState {
+        web::Data::new(Mutex::new(AppState {
             data_file: file_path,
-        }));
+        }))
+    }
+
+    #[actix_rt::test]
+    async fn test_get_books() {
+        let books = setup_books();
 
         let app = test::init_service(App::new().app_data(books).service(get_books)).await;
 
@@ -150,35 +183,45 @@ mod tests {
 
         assert!(body.contains("Rust Basics"));
         assert!(body.contains("Async in Rust"));
+        assert!(body.contains("Parallelism"));
     }
 
-    // #[actix_rt::test]
-    // async fn test_get_book_by_id() {
-    //     create_mock_data(); // モックデータの作成
+    #[actix_rt::test]
+    async fn test_get_book_by_id() {
+        let books = setup_books();
 
-    //     let app = test::init_service(App::new().service(get_book_by_id)).await;
+        let app = test::init_service(App::new().app_data(books).service(get_book_by_id)).await;
 
-    //     let req = test::TestRequest::get().uri("/books/id/1").to_request();
-    //     let resp = test::call_service(&app, req).await;
+        let req = test::TestRequest::get().uri("/books/id/1").to_request();
+        let resp = test::call_service(&app, req).await;
 
-    //     assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.status(), StatusCode::OK);
 
-    //     let body = test::read_body(resp).await;
-    //     assert!(body.contains("Test Book"));
-    // }
+        let body = test::read_body(resp).await;
+        let body = String::from_utf8_lossy(&body);
 
-    // #[actix_rt::test]
-    // async fn test_get_book_not_found() {
-    //     create_mock_data(); // モックデータの作成
+        assert!(body.contains("Rust Basics"));
 
-    //     let app = test::init_service(App::new().service(get_book_by_id)).await;
+        let req = test::TestRequest::get().uri("/books/id/50").to_request();
+        let resp = test::call_service(&app, req).await;
 
-    //     let req = test::TestRequest::get().uri("/books/id/999").to_request();
-    //     let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
 
-    //     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = test::read_body(resp).await;
+        let body = String::from_utf8_lossy(&body);
 
-    //     let body = test::read_body(resp).await;
-    //     assert_eq!(body, "Book not found");
-    // }
+        assert!(body.contains("Parallelism"));
+    }
+
+    #[actix_rt::test]
+    async fn test_get_book_not_found() {
+        let books = setup_books();
+
+        let app = test::init_service(App::new().app_data(books).service(get_book_by_id)).await;
+
+        let req = test::TestRequest::get().uri("/books/id/999").to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
 }
