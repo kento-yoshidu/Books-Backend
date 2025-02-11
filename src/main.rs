@@ -13,11 +13,13 @@ struct Book {
     id: u32,
     title: String,
     content: String,
+    tags: Vec<String>,
 }
 
 #[derive(Deserialize)]
 struct BookQuery {
     id: Option<u32>,
+    tag: Option<String>,
 }
 
 struct AppState {
@@ -78,15 +80,14 @@ async fn get_book_with_query(
 
     let books = read_books_from_file(&file_path)?;
 
-    if let Some(id) = query.id {
-        if let Some(book) = books.into_iter().find(|b| b.id == id as u32) {
-            return Ok(HttpResponse::Ok().json(book));
-        } else {
-            return Ok(HttpResponse::NotFound().body("Book not found"));
-        }
-    }
+    let filtered_books: Vec<Book> = books.into_iter()
+        .filter(|b| {
+            (query.id.map_or(true, |id| b.id == id as u32)) &&
+            (query.tag.as_deref().map_or(true, |tag| b.tags.contains(&tag.to_string())))
+        })
+        .collect();
 
-    Ok(HttpResponse::Ok().json(books))
+    Ok(HttpResponse::Ok().json(filtered_books))
 }
 
 #[get("/books/id/{id}")]
@@ -99,11 +100,11 @@ async fn get_book_by_id(data: web::Data::<Mutex<AppState>>, id: web::Path<u32>) 
 
     let books = read_books_from_file(&file_path)?;
 
-    if let Some(book) = books.into_iter().find(|b| b.id == id) {
-        Ok(HttpResponse::Ok().json(book))
-    } else {
-        Ok(HttpResponse::NotFound().body("Book not found"))
-    }
+    let filtered_book: Vec<Book> = books.into_iter()
+        .filter(|b| b.id == id)
+        .collect();
+
+    Ok(HttpResponse::Ok().json(filtered_book))
 }
 
 #[actix_web::main]
@@ -222,6 +223,27 @@ mod tests {
         let req = test::TestRequest::get().uri("/books/id/999").to_request();
         let resp = test::call_service(&app, req).await;
 
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body: Vec<Book> = test::read_body_json(resp).await;
+
+        assert!(body.is_empty());
+    }
+
+    #[actix_rt::test]
+    async fn test_get_book_with_query() {
+        let books = setup_books();
+
+        let app = test::init_service(App::new().app_data(books).service(get_book_with_query)).await;
+
+        let req = test::TestRequest::get().uri("/books/search?id=1").to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = test::read_body(resp).await;
+        let body = String::from_utf8_lossy(&body);
+
+        assert!(body.contains("Rust Basics"));
     }
 }
