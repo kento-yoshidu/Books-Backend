@@ -7,6 +7,24 @@ use serde::{Serialize, Deserialize};
 use env_logger::Env;
 use log::error;
 use thiserror::Error;
+use argon2::{Argon2, PasswordHasher, PasswordVerifier};
+use argon2::password_hash::{rand_core::OsRng, SaltString, PasswordHash};
+use std::io::{self, Read};
+
+fn hash_password(password: &str) -> String {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+
+    argon2.hash_password(password.as_bytes(), &salt)
+        .unwrap()
+        .to_string()
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct User {
+    username: String,
+    password: String,
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Book {
