@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use std::sync::Mutex;
-use actix_web::{get, middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, post, middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
 use actix_cors::Cors;
 use serde::{Serialize, Deserialize};
 use env_logger::Env;
@@ -68,6 +68,40 @@ async fn get_books(data: web::Data<Mutex<AppState>>) -> Result<impl Responder, B
     Ok(HttpResponse::Ok().json(books))
 }
 
+fn write_books_to_file(file_path: &str, books: &Vec<Book>) -> Result<(), BookError> {
+    let contents = serde_json::to_string_pretty(books)?;
+
+    fs::write(file_path, contents)?;
+
+    Ok(())
+}
+
+#[post("/books")]
+async fn add_or_update_book(data: web::Data<Mutex<AppState>>, new_book: web::Json<Book>) -> Result<impl Responder, BookError> {
+    let file_path = {
+        let state = data.lock().unwrap();
+        state.data_file.clone()
+    };
+
+    let mut books = read_books_from_file(&file_path)?;
+
+    let existing_book_pos = books.iter_mut().position(|b| b.id == new_book.id);
+
+    match existing_book_pos {
+        Some(pos) => {
+            books[pos] = new_book.into_inner();
+        }
+        None => {
+            books.push(new_book.into_inner());
+        }
+    }
+
+    // ファイルに保存
+    write_books_to_file(&file_path, &books)?;
+
+    Ok(HttpResponse::Ok().json(books))
+}
+
 #[get("/books/search")]
 async fn get_book_with_query(
     data: web::Data<Mutex<AppState>>,
@@ -109,7 +143,7 @@ async fn get_book_by_id(data: web::Data::<Mutex<AppState>>, id: web::Path<u32>) 
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    env_logger::init_from_env(Env::default().default_filter_or("info"));
+    env_logger::init_from_env(Env::default().default_filter_or("debug"));
 
     let current_dir = env::current_dir().expect("Failed to get current dir");
     let file_path = current_dir.join("src/data/book.json").to_str().unwrap().to_string();
@@ -147,6 +181,7 @@ async fn main() -> std::io::Result<()> {
             .service(get_books)
             .service(get_book_by_id)
             .service(get_book_with_query)
+            .service(add_or_update_book)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
