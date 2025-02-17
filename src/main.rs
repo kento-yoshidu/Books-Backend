@@ -9,7 +9,7 @@ use log::error;
 use thiserror::Error;
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use argon2::password_hash::{rand_core::OsRng, SaltString, PasswordHash};
-use std::io::{self, Read};
+use std::io::Read;
 
 fn hash_password(password: &str) -> String {
     let salt = SaltString::generate(&mut OsRng);
@@ -159,6 +159,32 @@ async fn get_book_by_id(data: web::Data::<Mutex<AppState>>, id: web::Path<u32>) 
     Ok(HttpResponse::Ok().json(filtered_book))
 }
 
+fn load_users() -> Vec<User> {
+    let mut file = match fs::File::open("users.json") {
+        Ok(file) => file,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).unwrap();
+
+    serde_json::from_str(&contents).unwrap_or_else(|_| Vec::new())
+}
+
+fn save_user(username: &str, password: &str) {
+    let hashed_password = hash_password(password);
+    let new_user = User {
+        username: username.to_string(),
+        password: hashed_password,
+    };
+
+    let mut users = load_users();
+    users.push(new_user);
+
+    let json = serde_json::to_string_pretty(&users).unwrap();
+    fs::write("src/users/users.json", json).expect("Failed to write file");
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env_logger::init_from_env(Env::default().default_filter_or("debug"));
@@ -169,6 +195,8 @@ async fn main() -> std::io::Result<()> {
     let books = web::Data::new(Mutex::new(AppState {
         data_file: file_path,
     }));
+
+    save_user("user1", "password");
 
     HttpServer::new(move || {
         App::new()
@@ -300,3 +328,10 @@ mod tests {
         assert!(body.contains("Rust Basics"));
     }
 }
+
+// fn verify_password(stored_hash: &str, password: &str) -> bool {
+//     let parsed_hash = PasswordHash::new(stored_hash).unwrap();
+//     let argon2 = Argon2::default();
+
+//     argon2.verify_password(password.as_bytes(), &parsed_hash).is_ok()
+// }
